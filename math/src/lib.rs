@@ -71,13 +71,8 @@ pub fn rad_2_deg(rad: f32) -> f32 {
 
 #[inline]
 pub fn perspective_rh(aspect_ratio: f32) -> [[f32; 4]; 4] {
-    glam::Mat4::perspective_rh(
-        std::f32::consts::FRAC_PI_2,
-        aspect_ratio,
-        0.1,
-        1000.0,
-    )
-    .to_cols_array_2d()
+    glam::Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, aspect_ratio, 0.1, 1000.0)
+        .to_cols_array_2d()
 }
 
 #[inline]

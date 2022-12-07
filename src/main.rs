@@ -1,16 +1,18 @@
 mod shaders;
 mod teapot;
+mod settings;
 
-use crate::shaders::{fs, vs, Vertex};
+use crate::shaders::{fs, vs, Vertex, MonkeInstance};
+
 use math::{perspective_rh, Mat3, Mat4, Vec3};
 use obj::{load_obj, Obj};
 use std::fs::File;
 use std::io::BufReader;
 use std::{sync::Arc, time::Instant};
 use vulkano::device::Features;
-use vulkano::pipeline::graphics::depth_stencil::{DepthBoundsState, DepthState};
-use vulkano::pipeline::graphics::rasterization::{CullMode, PolygonMode, RasterizationState};
-use vulkano::pipeline::StateMode;
+use vulkano::image::SampleCount;
+
+use vulkano::pipeline::graphics::multisample::MultisampleState;
 use vulkano::sync::now;
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool, TypedBufferAccess},
@@ -27,7 +29,6 @@ use vulkano::{
     },
     format::Format,
     image::{view::ImageView, AttachmentImage, ImageAccess, ImageUsage, SwapchainImage},
-    impl_vertex,
     instance::{Instance, InstanceCreateInfo},
     memory::allocator::{MemoryUsage, StandardMemoryAllocator},
     pipeline::{
@@ -48,9 +49,6 @@ use vulkano::{
     sync::{FlushError, GpuFuture},
     VulkanLibrary,
 };
-use vulkano::image::SampleCount;
-use vulkano::pipeline::graphics::color_blend::ColorBlendState;
-use vulkano::pipeline::graphics::multisample::MultisampleState;
 use vulkano_win::VkSurfaceBuild;
 use winit::event_loop::ControlFlow;
 use winit::{
@@ -58,12 +56,11 @@ use winit::{
     event_loop::EventLoop,
     window::{Window, WindowBuilder},
 };
-use crate::teapot::{INDICES, NORMALS, VERTICES};
+use winit::event::VirtualKeyCode;
+use winit::window::Fullscreen;
+use crate::settings::Levels;
 
 fn main() {
-    // The start of this example is exactly the same as `triangle`. You should read the
-    // `triangle` example if you haven't done so yet.
-
     let library = VulkanLibrary::new().unwrap();
     let required_extensions = vulkano_win::required_extensions(&library);
     let instance = Instance::new(
@@ -75,10 +72,11 @@ fn main() {
             ..Default::default()
         },
     )
-        .unwrap();
+    .unwrap();
 
     let event_loop = EventLoop::new();
     let surface = WindowBuilder::new()
+        .with_fullscreen(Some(Fullscreen::Borderless(None)))
         .build_vk_surface(&event_loop, instance.clone())
         .unwrap();
 
@@ -130,7 +128,7 @@ fn main() {
             ..Default::default()
         },
     )
-        .unwrap();
+    .unwrap();
 
     let queue = queues.next().unwrap();
 
@@ -168,7 +166,7 @@ fn main() {
                 ..Default::default()
             },
         )
-            .unwrap()
+        .unwrap()
     };
 
     let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
@@ -193,7 +191,7 @@ fn main() {
         false,
         vertex_data,
     )
-        .unwrap();
+    .unwrap();
 
     let index_buffer = CpuAccessibleBuffer::from_iter(
         &memory_allocator,
@@ -204,9 +202,73 @@ fn main() {
         false,
         index_data,
     )
-        .unwrap();
+    .unwrap();
 
-    let uniform_buffer = CpuBufferPool::<vs::ty::Data>::new(
+    let mut instances = [
+        MonkeInstance {
+            transform: [0.0, 0.0, -35.0],
+            colour: [1.0, 0.0, 0.0],
+            scale: 16.0,
+        },
+        MonkeInstance {
+            transform: [0.0, 0.0, -30.0],
+            colour: [1.0, 0.0, 0.0],
+            scale: 14.0,
+        },
+        MonkeInstance {
+            transform: [0.0, 0.0, -25.0],
+            colour: [1.0, 0.0, 0.0],
+            scale: 12.0,
+        },
+        MonkeInstance {
+            transform: [0.0, 0.0, -20.0],
+            colour: [1.0, 0.0, 0.0],
+            scale: 10.0,
+        },
+        MonkeInstance {
+            transform: [0.0, 0.0, -15.0],
+            colour: [1.0, 0.0, 0.0],
+            scale: 8.0,
+        },
+        MonkeInstance {
+            transform: [0.0, 0.0, -10.0],
+            colour: [1.0, 0.0, 0.0],
+            scale: 6.0,
+        },
+        MonkeInstance {
+            transform: [0.0, 0.0, -5.0],
+            colour: [1.0, 0.0, 0.0],
+            scale: 4.0,
+        },
+        MonkeInstance {
+            transform: [0.0, 0.0, -1.0],
+            colour: [0.0, 1.0, 0.0],
+            scale: 1.0,
+        },
+    ];
+
+    instances.reverse();
+
+    let instance_buffer = CpuAccessibleBuffer::from_iter(
+        &memory_allocator,
+        BufferUsage {
+            vertex_buffer: true,
+            ..BufferUsage::empty()
+        },
+        false,
+        instances
+    ).unwrap();
+
+    let vs_uniform_buffer = CpuBufferPool::<vs::ty::Data>::new(
+        memory_allocator.clone(),
+        BufferUsage {
+            uniform_buffer: true,
+            ..BufferUsage::empty()
+        },
+        MemoryUsage::Upload,
+    );
+
+    let fs_uniform_buffer = CpuBufferPool::<fs::ty::Data>::new(
         memory_allocator.clone(),
         BufferUsage {
             uniform_buffer: true,
@@ -218,7 +280,7 @@ fn main() {
     let vs = vs::load(device.clone()).unwrap();
     let fs = fs::load(device.clone()).unwrap();
 
-    let render_pass = vulkano::single_pass_renderpass!(device.clone(),
+    let render_pass_1 = vulkano::single_pass_renderpass!(device.clone(),
         attachments: {
             intermediary: {
                 load: Clear,
@@ -245,10 +307,32 @@ fn main() {
             resolve: [color]
         }
     )
-        .unwrap();
+    .unwrap();
+
+    let render_pass_2 = vulkano::single_pass_renderpass!(device.clone(),
+        attachments: {
+            color: {
+                load: Clear,
+                store: Store,
+                format: swapchain.image_format(),
+                samples: 1,
+            },
+            depth: {
+                load: Clear,
+                store: DontCare,
+                format: Format::D16_UNORM,
+                samples: 1,
+            }
+        },
+        pass: {
+            color: [color],
+            depth_stencil: {depth}
+        }
+    )
+    .unwrap();
 
     let (mut pipeline, mut framebuffers) =
-        window_size_dependent_setup(&memory_allocator, &vs, &fs, &images, render_pass.clone());
+        window_size_dependent_setup(&memory_allocator, &vs, &fs, &images, render_pass_2.clone(), Levels::ONE);
     let mut recreate_swapchain = false;
 
     let mut previous_frame_end = Some(now(device.clone()).boxed());
@@ -258,17 +342,52 @@ fn main() {
     let command_buffer_allocator =
         StandardCommandBufferAllocator::new(device.clone(), Default::default());
 
+    let mut level = Levels::ONE;
     event_loop.run(move |event, _, control_flow| {
         match event {
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => *control_flow = ControlFlow::Exit,
-            Event::WindowEvent {
-                event: WindowEvent::Resized(_),
-                ..
-            } => {
-                recreate_swapchain = true;
+            Event::WindowEvent { event, .. } => {
+                match event {
+                    WindowEvent::CloseRequested => {
+                        *control_flow = ControlFlow::Exit
+                    }
+                    WindowEvent::Resized(_) => {
+                        recreate_swapchain = true;
+                    }
+                    WindowEvent::KeyboardInput { input, .. } => {
+                        match input.virtual_keycode {
+                            Some(input) => {
+                                match input {
+                                    VirtualKeyCode::Escape => {
+                                        *control_flow = ControlFlow::Exit
+                                    },
+                                    VirtualKeyCode::Key1 => {
+                                        level = Levels::ONE;
+                                        recreate_swapchain = true;
+                                    }
+                                    VirtualKeyCode::Key2 => {
+                                        level = Levels::TWO;
+                                        recreate_swapchain = true;
+                                    }
+                                    VirtualKeyCode::Key3 => {
+                                        level = Levels::THREE;
+                                        recreate_swapchain = true;
+                                    }
+                                    VirtualKeyCode::Key4 => {
+                                        level = Levels::FOUR;
+                                        recreate_swapchain = true;
+                                    }
+                                    VirtualKeyCode::Key5 => {
+                                        level = Levels::FIVE;
+                                        recreate_swapchain = true;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            None => {}
+                        }
+                    }
+                    _ => {}
+                }
             }
             Event::RedrawEventsCleared => {
                 let window = surface.object().unwrap().downcast_ref::<Window>().unwrap();
@@ -296,26 +415,31 @@ fn main() {
                         &vs,
                         &fs,
                         &new_images,
-                        render_pass.clone(),
+                        {
+                            if level >= Levels::FOUR {
+                                render_pass_1.clone()
+                            } else {
+                                render_pass_2.clone()
+                            }
+                        },
+                        level
                     );
                     pipeline = new_pipeline;
                     framebuffers = new_framebuffers;
                     recreate_swapchain = false;
                 }
 
-                let uniform_buffer_subbuffer = {
+                let vs_uniform_buffer_subbuffer = {
                     let elapsed = rotation_start.elapsed();
                     let rotation =
                         elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1_000_000_000.0;
-                    let rotation = Mat3::from_rotation_y((rotation / 2.0) as f32);
+                    let rotation = Mat3::from_rotation_y((0) as f32);
 
-                    // note: this teapot was meant for OpenGL where the origin is at the lower left
-                    //       instead the origin is at the upper left in Vulkan, so we reverse the Y axis
                     let aspect_ratio =
                         swapchain.image_extent()[0] as f32 / swapchain.image_extent()[1] as f32;
                     let proj = perspective_rh(aspect_ratio);
                     let view = Mat4::look_at_rh(
-                        Vec3::new(0.3, 0.3, 2.0),
+                        Vec3::new(0.0, 0.0, 2.0),
                         Vec3::new(0.0, 0.0, 0.0),
                         Vec3::new(0.0, -1.0, 0.0),
                     );
@@ -325,18 +449,31 @@ fn main() {
                         world: Mat4::from_mat3(rotation).to_cols_array_2d(),
                         view: (view * scale).to_cols_array_2d(),
                         proj,
+                        lev_2: (level >= Levels::TWO) as u32,
                     };
 
-                    uniform_buffer.from_data(uniform_data).unwrap()
+                    vs_uniform_buffer.from_data(uniform_data).unwrap()
                 };
+
+                let fs_uniform_buffer_subbuffer = {
+                    let uniform_data = fs::ty::Data {
+                        lighting: (level >= Levels::FIVE) as u32,
+                    };
+
+                    fs_uniform_buffer.from_data(uniform_data).unwrap()
+                };
+
 
                 let layout = pipeline.layout().set_layouts().get(0).unwrap();
                 let set = PersistentDescriptorSet::new(
                     &descriptor_set_allocator,
                     layout.clone(),
-                    [WriteDescriptorSet::buffer(0, uniform_buffer_subbuffer)],
+                    [
+                        WriteDescriptorSet::buffer(0, vs_uniform_buffer_subbuffer),
+                        WriteDescriptorSet::buffer(1, fs_uniform_buffer_subbuffer)
+                    ],
                 )
-                    .unwrap();
+                .unwrap();
 
                 let (image_index, suboptimal, acquire_future) =
                     match acquire_next_image(swapchain.clone(), None) {
@@ -357,15 +494,24 @@ fn main() {
                     queue.queue_family_index(),
                     CommandBufferUsage::OneTimeSubmit,
                 )
-                    .unwrap();
+                .unwrap();
                 builder
                     .begin_render_pass(
                         RenderPassBeginInfo {
-                            clear_values: vec![
-                                Some([0.0, 0.2, 0.6, 1.0].into()),
-                                Some([0.0, 0.2, 0.6, 1.0].into()),
-                                Some(1f32.into()),
-                            ],
+                            clear_values: {
+                                if level >= Levels::FOUR {
+                                    vec![
+                                        Some([0.0, 0.2, 0.6, 1.0].into()),
+                                        Some([0.0, 0.2, 0.6, 1.0].into()),
+                                        Some(1f32.into())
+                                    ]
+                                } else {
+                                    vec![
+                                        Some([0.0, 0.2, 0.6, 1.0].into()),
+                                        Some(1f32.into())
+                                    ]
+                                }
+                            },
                             ..RenderPassBeginInfo::framebuffer(
                                 framebuffers[image_index as usize].clone(),
                             )
@@ -380,9 +526,9 @@ fn main() {
                         0,
                         set,
                     )
-                    .bind_vertex_buffers(0, vertex_buffer.clone())
+                    .bind_vertex_buffers(0, (vertex_buffer.clone(), instance_buffer.clone()))
                     .bind_index_buffer(index_buffer.clone())
-                    .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
+                    .draw_indexed(index_buffer.len() as u32, instance_buffer.len() as u32, 0, 0, 0)
                     .unwrap()
                     .end_render_pass()
                     .unwrap();
@@ -426,15 +572,30 @@ fn window_size_dependent_setup(
     fs: &ShaderModule,
     images: &[Arc<SwapchainImage>],
     render_pass: Arc<RenderPass>,
+    level: Levels,
 ) -> (Arc<GraphicsPipeline>, Vec<Arc<Framebuffer>>) {
     let dimensions = images[0].dimensions().width_height();
 
-    let depth_buffer = ImageView::new_default(
-        AttachmentImage::transient_multisampled(memory_allocator, dimensions, SampleCount::Sample4, Format::D16_UNORM).unwrap(),
+    let depth_buffer_multi = ImageView::new_default(
+        AttachmentImage::transient_multisampled(
+            memory_allocator,
+            dimensions,
+            SampleCount::Sample4,
+            Format::D16_UNORM,
+        )
+        .unwrap(),
     )
-        .unwrap();
+    .unwrap();
 
-
+    let depth_buffer = ImageView::new_default(
+        AttachmentImage::transient(
+            memory_allocator,
+            dimensions,
+            Format::D16_UNORM,
+        )
+        .unwrap(),
+    )
+    .unwrap();
 
     let framebuffers = images
         .iter()
@@ -446,29 +607,36 @@ fn window_size_dependent_setup(
                     SampleCount::Sample4,
                     image.format(),
                 )
-                    .unwrap(),
+                .unwrap(),
             )
-                .unwrap();
+            .unwrap();
             let view = ImageView::new_default(image.clone()).unwrap();
-            Framebuffer::new(
-                render_pass.clone(),
-                FramebufferCreateInfo {
-                    attachments: vec![intermediary, view, depth_buffer.clone()],
-                    ..Default::default()
-                },
-            )
-                .unwrap()
+            return if level >= Levels::FOUR {
+                Framebuffer::new(
+                    render_pass.clone(),
+                    FramebufferCreateInfo {
+                        attachments: vec![intermediary, view, depth_buffer_multi.clone()],
+                        ..Default::default()
+                    },
+                )
+                    .unwrap()
+            } else {
+                Framebuffer::new(
+                    render_pass.clone(),
+                    FramebufferCreateInfo {
+                        attachments: vec![view, depth_buffer.clone()],
+                        ..Default::default()
+                    },
+                )
+                    .unwrap()
+            }
         })
         .collect::<Vec<_>>();
 
-    let pipeline = GraphicsPipeline::start()
-        .multisample_state(MultisampleState {
-            rasterization_samples: SampleCount::Sample4,
-            ..Default::default()
-        })
-        .vertex_input_state(
-            BuffersDefinition::new()
-                .vertex::<Vertex>()
+    let mut pipeline = GraphicsPipeline::start()
+        .vertex_input_state(BuffersDefinition::new()
+            .vertex::<Vertex>()
+            .instance::<MonkeInstance>()
         )
         .vertex_shader(vs.entry_point("main").unwrap(), ())
         .input_assembly_state(InputAssemblyState::new())
@@ -479,11 +647,23 @@ fn window_size_dependent_setup(
                 depth_range: 0.0..1.0,
             },
         ]))
-        .fragment_shader(fs.entry_point("main").unwrap(), ())
-        .depth_stencil_state(DepthStencilState::simple_depth_test())
-        .render_pass(Subpass::from(render_pass, 0).unwrap())
-        .build(memory_allocator.device().clone())
-        .unwrap();
+        .fragment_shader(fs.entry_point("main").unwrap(), ());
+        if level >= Levels::THREE {
+            pipeline = pipeline.depth_stencil_state(DepthStencilState::simple_depth_test());
+        } else {
+            pipeline = pipeline.depth_stencil_state(DepthStencilState::disabled());
+        }
+
+        if level >= Levels::FOUR {
+            pipeline = pipeline.multisample_state(MultisampleState {
+                rasterization_samples: SampleCount::Sample4,
+                ..Default::default()
+            })
+        }
+        let pipeline = pipeline
+            .render_pass(Subpass::from(render_pass, 0).unwrap())
+            .build(memory_allocator.device().clone())
+            .unwrap();
 
     (pipeline, framebuffers)
 }

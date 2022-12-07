@@ -18,6 +18,8 @@ pub mod fs {
         ty: "fragment",
         path: "src/shaders/shader.frag",
         types_meta: {
+            use bytemuck::{Zeroable, Pod};
+
             #[derive(Clone, Copy, Zeroable, Pod)]
         }
     }
@@ -35,8 +37,9 @@ impl_vertex!(Vertex, position, normal);
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 pub struct MonkeInstance {
+    pub transform: [f32; 3],
     pub colour: [f32; 3],
-    pub object_matrix: [[f32; 4]; 4],
+    pub scale: f32,
 }
 
-impl_vertex!(MonkeInstance, colour, object_matrix);
+impl_vertex!(MonkeInstance, transform, colour, scale);
