@@ -4,7 +4,7 @@ pub use glam::*;
 pub struct Location {
     pub rotation: Vec3,
     pub position: Vec3,
-    pub scale: Vec3
+    pub scale: Vec3,
 }
 
 impl Location {
@@ -12,13 +12,13 @@ impl Location {
         Self {
             rotation: rot.into(),
             position: pos.into(),
-            scale: scale.into()
+            scale: scale.into(),
         }
     }
 
     pub fn calculate_matrix(&self) -> glam::Mat4 {
-        Mat4::from_scale(self.scale) *
-        Mat4::from_translation(self.position)
+        Mat4::from_scale(self.scale)
+            * Mat4::from_translation(self.position)
             * Mat4::from_euler(
                 glam::EulerRot::XYZ,
                 self.rotation.x,
@@ -71,8 +71,13 @@ pub fn rad_2_deg(rad: f32) -> f32 {
 
 #[inline]
 pub fn perspective_rh(aspect_ratio: f32) -> [[f32; 4]; 4] {
-    glam::Mat4::perspective_rh(deg_2_rad(std::f32::consts::FRAC_PI_2), aspect_ratio, 0.1, 1000.0)
-        .to_cols_array_2d()
+    glam::Mat4::perspective_rh(
+        std::f32::consts::FRAC_PI_2,
+        aspect_ratio,
+        0.1,
+        1000.0,
+    )
+    .to_cols_array_2d()
 }
 
 #[inline]

@@ -13,6 +13,7 @@ winit = "0.27"
 bytemuck = "1.12"
 obj-rs = "0.7"
 math = { path="./math" }
+cgmath = "0.18"
 
 
 [target.x86_64-pc-windows-gnu]

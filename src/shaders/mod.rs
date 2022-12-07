@@ -1,5 +1,5 @@
-use vulkano::impl_vertex;
 use bytemuck::{Pod, Zeroable};
+use vulkano::impl_vertex;
 
 pub mod vs {
     vulkano_shaders::shader! {
@@ -36,7 +36,7 @@ impl_vertex!(Vertex, position, normal);
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 pub struct MonkeInstance {
     pub colour: [f32; 3],
-    pub object_matrix: [[f32; 4]; 4]
+    pub object_matrix: [[f32; 4]; 4],
 }
 
 impl_vertex!(MonkeInstance, colour, object_matrix);

@@ -1,39 +1,64 @@
 mod shaders;
+mod teapot;
 
-use std::{sync::Arc, time::Instant};
+use crate::shaders::{fs, vs, Vertex};
+use math::{perspective_rh, Mat3, Mat4, Vec3};
+use obj::{load_obj, Obj};
 use std::fs::File;
 use std::io::BufReader;
-use math::{Mat3, Mat4, perspective_rh, Vec3};
-use obj::{load_obj, Obj};
-use vulkano::{buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool, TypedBufferAccess}, command_buffer::{
-    allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
-    RenderPassBeginInfo, SubpassContents,
-}, descriptor_set::{
-    allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
-}, device::{
-    physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, DeviceOwned,
-    QueueCreateInfo,
-}, format::Format, image::{view::ImageView, AttachmentImage, ImageAccess, ImageUsage, SwapchainImage}, impl_vertex, instance::{Instance, InstanceCreateInfo}, memory::allocator::{MemoryUsage, StandardMemoryAllocator}, pipeline::{
-    graphics::{
-        depth_stencil::DepthStencilState,
-        input_assembly::InputAssemblyState,
-        vertex_input::BuffersDefinition,
-        viewport::{Viewport, ViewportState},
-    },
-    GraphicsPipeline, Pipeline, PipelineBindPoint,
-}, render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass}, shader::ShaderModule, swapchain::{
-    acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError,
-    SwapchainPresentInfo,
-}, sync::{FlushError, GpuFuture}, VulkanLibrary};
+use std::{sync::Arc, time::Instant};
+use vulkano::device::Features;
+use vulkano::pipeline::graphics::depth_stencil::{DepthBoundsState, DepthState};
+use vulkano::pipeline::graphics::rasterization::{CullMode, PolygonMode, RasterizationState};
+use vulkano::pipeline::StateMode;
 use vulkano::sync::now;
+use vulkano::{
+    buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool, TypedBufferAccess},
+    command_buffer::{
+        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
+        RenderPassBeginInfo, SubpassContents,
+    },
+    descriptor_set::{
+        allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
+    },
+    device::{
+        physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, DeviceOwned,
+        QueueCreateInfo,
+    },
+    format::Format,
+    image::{view::ImageView, AttachmentImage, ImageAccess, ImageUsage, SwapchainImage},
+    impl_vertex,
+    instance::{Instance, InstanceCreateInfo},
+    memory::allocator::{MemoryUsage, StandardMemoryAllocator},
+    pipeline::{
+        graphics::{
+            depth_stencil::DepthStencilState,
+            input_assembly::InputAssemblyState,
+            vertex_input::BuffersDefinition,
+            viewport::{Viewport, ViewportState},
+        },
+        GraphicsPipeline, Pipeline, PipelineBindPoint,
+    },
+    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
+    shader::ShaderModule,
+    swapchain::{
+        acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError,
+        SwapchainPresentInfo,
+    },
+    sync::{FlushError, GpuFuture},
+    VulkanLibrary,
+};
+use vulkano::image::SampleCount;
+use vulkano::pipeline::graphics::color_blend::ColorBlendState;
+use vulkano::pipeline::graphics::multisample::MultisampleState;
 use vulkano_win::VkSurfaceBuild;
+use winit::event_loop::ControlFlow;
 use winit::{
     event::{Event, WindowEvent},
-    event_loop::{EventLoop},
+    event_loop::EventLoop,
     window::{Window, WindowBuilder},
 };
-use winit::event_loop::ControlFlow;
-use crate::shaders::{fs, Vertex, vs};
+use crate::teapot::{INDICES, NORMALS, VERTICES};
 
 fn main() {
     // The start of this example is exactly the same as `triangle`. You should read the
@@ -98,6 +123,10 @@ fn main() {
                 queue_family_index,
                 ..Default::default()
             }],
+            enabled_features: Features {
+                fill_mode_non_solid: true,
+                ..Default::default()
+            },
             ..Default::default()
         },
     )
@@ -128,6 +157,7 @@ fn main() {
                 image_extent: window.inner_size().into(),
                 image_usage: ImageUsage {
                     color_attachment: true,
+                    transfer_dst: true,
                     ..ImageUsage::empty()
                 },
                 composite_alpha: surface_capabilities
@@ -149,7 +179,7 @@ fn main() {
     for i in monke.vertices {
         vertex_data.push(Vertex {
             position: i.position,
-            normal: i.normal
+            normal: i.normal,
         });
     }
     let index_data = monke.indices;
@@ -190,6 +220,12 @@ fn main() {
 
     let render_pass = vulkano::single_pass_renderpass!(device.clone(),
         attachments: {
+            intermediary: {
+                load: Clear,
+                store: DontCare,
+                format: swapchain.image_format(),
+                samples: 4,     // This has to match the image definition.
+            },
             color: {
                 load: Clear,
                 store: Store,
@@ -200,12 +236,13 @@ fn main() {
                 load: Clear,
                 store: DontCare,
                 format: Format::D16_UNORM,
-                samples: 1,
+                samples: 4,
             }
         },
         pass: {
-            color: [color],
-            depth_stencil: {depth}
+            color: [intermediary],
+            depth_stencil: {depth},
+            resolve: [color]
         }
     )
         .unwrap();
@@ -270,17 +307,15 @@ fn main() {
                     let elapsed = rotation_start.elapsed();
                     let rotation =
                         elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1_000_000_000.0;
-                    let rotation = Mat3::from_rotation_y(rotation as f32);
+                    let rotation = Mat3::from_rotation_y((rotation / 2.0) as f32);
 
                     // note: this teapot was meant for OpenGL where the origin is at the lower left
                     //       instead the origin is at the upper left in Vulkan, so we reverse the Y axis
                     let aspect_ratio =
                         swapchain.image_extent()[0] as f32 / swapchain.image_extent()[1] as f32;
-                    let proj = perspective_rh(
-                        aspect_ratio
-                    );
+                    let proj = perspective_rh(aspect_ratio);
                     let view = Mat4::look_at_rh(
-                        Vec3::new(0.3, 0.3, 100.0),
+                        Vec3::new(0.3, 0.3, 2.0),
                         Vec3::new(0.0, 0.0, 0.0),
                         Vec3::new(0.0, -1.0, 0.0),
                     );
@@ -327,7 +362,8 @@ fn main() {
                     .begin_render_pass(
                         RenderPassBeginInfo {
                             clear_values: vec![
-                                Some([0.0, 0.0, 1.0, 1.0].into()),
+                                Some([0.0, 0.2, 0.6, 1.0].into()),
+                                Some([0.0, 0.2, 0.6, 1.0].into()),
                                 Some(1f32.into()),
                             ],
                             ..RenderPassBeginInfo::framebuffer(
@@ -344,7 +380,7 @@ fn main() {
                         0,
                         set,
                     )
-                    .bind_vertex_buffers(0, (vertex_buffer.clone()))
+                    .bind_vertex_buffers(0, vertex_buffer.clone())
                     .bind_index_buffer(index_buffer.clone())
                     .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
                     .unwrap()
@@ -394,18 +430,30 @@ fn window_size_dependent_setup(
     let dimensions = images[0].dimensions().width_height();
 
     let depth_buffer = ImageView::new_default(
-        AttachmentImage::transient(memory_allocator, dimensions, Format::D16_UNORM).unwrap(),
+        AttachmentImage::transient_multisampled(memory_allocator, dimensions, SampleCount::Sample4, Format::D16_UNORM).unwrap(),
     )
         .unwrap();
+
+
 
     let framebuffers = images
         .iter()
         .map(|image| {
+            let intermediary = ImageView::new_default(
+                AttachmentImage::transient_multisampled(
+                    memory_allocator,
+                    image.dimensions().width_height(),
+                    SampleCount::Sample4,
+                    image.format(),
+                )
+                    .unwrap(),
+            )
+                .unwrap();
             let view = ImageView::new_default(image.clone()).unwrap();
             Framebuffer::new(
                 render_pass.clone(),
                 FramebufferCreateInfo {
-                    attachments: vec![view, depth_buffer.clone()],
+                    attachments: vec![intermediary, view, depth_buffer.clone()],
                     ..Default::default()
                 },
             )
@@ -414,6 +462,10 @@ fn window_size_dependent_setup(
         .collect::<Vec<_>>();
 
     let pipeline = GraphicsPipeline::start()
+        .multisample_state(MultisampleState {
+            rasterization_samples: SampleCount::Sample4,
+            ..Default::default()
+        })
         .vertex_input_state(
             BuffersDefinition::new()
                 .vertex::<Vertex>()
@@ -428,7 +480,7 @@ fn window_size_dependent_setup(
             },
         ]))
         .fragment_shader(fs.entry_point("main").unwrap(), ())
-        .depth_stencil_state(DepthStencilState::disabled())
+        .depth_stencil_state(DepthStencilState::simple_depth_test())
         .render_pass(Subpass::from(render_pass, 0).unwrap())
         .build(memory_allocator.device().clone())
         .unwrap();
