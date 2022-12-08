@@ -1,8 +1,7 @@
-mod shaders;
-mod teapot;
 mod settings;
+mod shaders;
 
-use crate::shaders::{fs, vs, Vertex, MonkeInstance};
+use crate::shaders::{fs, vs, MonkeInstance, Vertex};
 
 use math::{perspective_rh, Mat3, Mat4, Vec3};
 use obj::{load_obj, Obj};
@@ -12,6 +11,7 @@ use std::{sync::Arc, time::Instant};
 use vulkano::device::Features;
 use vulkano::image::SampleCount;
 
+use crate::settings::Levels;
 use vulkano::pipeline::graphics::multisample::MultisampleState;
 use vulkano::sync::now;
 use vulkano::{
@@ -50,15 +50,14 @@ use vulkano::{
     VulkanLibrary,
 };
 use vulkano_win::VkSurfaceBuild;
+use winit::event::VirtualKeyCode;
 use winit::event_loop::ControlFlow;
+use winit::window::Fullscreen;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::EventLoop,
     window::{Window, WindowBuilder},
 };
-use winit::event::VirtualKeyCode;
-use winit::window::Fullscreen;
-use crate::settings::Levels;
 
 fn main() {
     let library = VulkanLibrary::new().unwrap();
@@ -76,7 +75,8 @@ fn main() {
 
     let event_loop = EventLoop::new();
     let surface = WindowBuilder::new()
-        .with_fullscreen(Some(Fullscreen::Borderless(None)))
+        .with_title("RENDERING DEMO")
+        .with_maximized(true)
         .build_vk_surface(&event_loop, instance.clone())
         .unwrap();
 
@@ -172,7 +172,7 @@ fn main() {
     let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
 
     let mut vertex_data = vec![];
-    let input = BufReader::new(File::open("src/models/monke.obj").unwrap());
+    let input = BufReader::new(File::open("monke.obj").unwrap());
     let monke: Obj = load_obj(input).unwrap();
     for i in monke.vertices {
         vertex_data.push(Vertex {
@@ -206,44 +206,44 @@ fn main() {
 
     let mut instances = [
         MonkeInstance {
-            transform: [0.0, 0.0, -35.0],
-            colour: [1.0, 0.0, 0.0],
+            transform: [0.0, 0.0, -320.0],
+            colour: [0.46, 0.15, 0.58],
+            scale: 135.0,
+        },
+        MonkeInstance {
+            transform: [0.0, 0.0, -160.0],
+            colour: [0.14, 0.71, 0.95],
+            scale: 64.0,
+        },
+        MonkeInstance {
+            transform: [0.0, 0.0, -80.0],
+            colour: [0.66, 0.31, 0.64],
+            scale: 32.0,
+        },
+        MonkeInstance {
+            transform: [0.0, 0.0, -40.0],
+            colour: [0.00, 0.81, 0.73],
             scale: 16.0,
         },
         MonkeInstance {
-            transform: [0.0, 0.0, -30.0],
-            colour: [1.0, 0.0, 0.0],
-            scale: 14.0,
-        },
-        MonkeInstance {
-            transform: [0.0, 0.0, -25.0],
-            colour: [1.0, 0.0, 0.0],
-            scale: 12.0,
-        },
-        MonkeInstance {
             transform: [0.0, 0.0, -20.0],
-            colour: [1.0, 0.0, 0.0],
-            scale: 10.0,
-        },
-        MonkeInstance {
-            transform: [0.0, 0.0, -15.0],
-            colour: [1.0, 0.0, 0.0],
+            colour: [0.10, 0.89, 0.67],
             scale: 8.0,
         },
         MonkeInstance {
             transform: [0.0, 0.0, -10.0],
-            colour: [1.0, 0.0, 0.0],
-            scale: 6.0,
-        },
-        MonkeInstance {
-            transform: [0.0, 0.0, -5.0],
-            colour: [1.0, 0.0, 0.0],
+            colour: [0.02, 0.71, 0.86],
             scale: 4.0,
         },
         MonkeInstance {
-            transform: [0.0, 0.0, -1.0],
+            transform: [0.0, 0.0, -5.0],
+            colour: [0.72, 0.04, 0.13],
+            scale: 2.0,
+        },
+        MonkeInstance {
+            transform: [0.0, 0.0, 0.0],
             colour: [0.0, 1.0, 0.0],
-            scale: 1.0,
+            scale: 0.4,
         },
     ];
 
@@ -256,8 +256,9 @@ fn main() {
             ..BufferUsage::empty()
         },
         false,
-        instances
-    ).unwrap();
+        instances,
+    )
+    .unwrap();
 
     let vs_uniform_buffer = CpuBufferPool::<vs::ty::Data>::new(
         memory_allocator.clone(),
@@ -286,7 +287,7 @@ fn main() {
                 load: Clear,
                 store: DontCare,
                 format: swapchain.image_format(),
-                samples: 4,     // This has to match the image definition.
+                samples: 8,     // This has to match the image definition.
             },
             color: {
                 load: Clear,
@@ -298,7 +299,7 @@ fn main() {
                 load: Clear,
                 store: DontCare,
                 format: Format::D16_UNORM,
-                samples: 4,
+                samples: 8,
             }
         },
         pass: {
@@ -331,8 +332,14 @@ fn main() {
     )
     .unwrap();
 
-    let (mut pipeline, mut framebuffers) =
-        window_size_dependent_setup(&memory_allocator, &vs, &fs, &images, render_pass_2.clone(), Levels::ONE);
+    let (mut pipeline, mut framebuffers) = window_size_dependent_setup(
+        &memory_allocator,
+        &vs,
+        &fs,
+        &images,
+        render_pass_2.clone(),
+        Levels::ONE,
+    );
     let mut recreate_swapchain = false;
 
     let mut previous_frame_end = Some(now(device.clone()).boxed());
@@ -343,225 +350,211 @@ fn main() {
         StandardCommandBufferAllocator::new(device.clone(), Default::default());
 
     let mut level = Levels::ONE;
-    event_loop.run(move |event, _, control_flow| {
-        match event {
-            Event::WindowEvent { event, .. } => {
-                match event {
-                    WindowEvent::CloseRequested => {
-                        *control_flow = ControlFlow::Exit
-                    }
-                    WindowEvent::Resized(_) => {
+    event_loop.run(move |event, _, control_flow| match event {
+        Event::WindowEvent { event, .. } => match event {
+            WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+            WindowEvent::Resized(_) => {
+                recreate_swapchain = true;
+            }
+            WindowEvent::KeyboardInput { input, .. } => match input.virtual_keycode {
+                Some(input) => match input {
+                    VirtualKeyCode::Escape => *control_flow = ControlFlow::Exit,
+                    VirtualKeyCode::Key1 => {
+                        level = Levels::ONE;
                         recreate_swapchain = true;
                     }
-                    WindowEvent::KeyboardInput { input, .. } => {
-                        match input.virtual_keycode {
-                            Some(input) => {
-                                match input {
-                                    VirtualKeyCode::Escape => {
-                                        *control_flow = ControlFlow::Exit
-                                    },
-                                    VirtualKeyCode::Key1 => {
-                                        level = Levels::ONE;
-                                        recreate_swapchain = true;
-                                    }
-                                    VirtualKeyCode::Key2 => {
-                                        level = Levels::TWO;
-                                        recreate_swapchain = true;
-                                    }
-                                    VirtualKeyCode::Key3 => {
-                                        level = Levels::THREE;
-                                        recreate_swapchain = true;
-                                    }
-                                    VirtualKeyCode::Key4 => {
-                                        level = Levels::FOUR;
-                                        recreate_swapchain = true;
-                                    }
-                                    VirtualKeyCode::Key5 => {
-                                        level = Levels::FIVE;
-                                        recreate_swapchain = true;
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            None => {}
-                        }
+                    VirtualKeyCode::Key2 => {
+                        level = Levels::TWO;
+                        recreate_swapchain = true;
+                    }
+                    VirtualKeyCode::Key3 => {
+                        level = Levels::THREE;
+                        recreate_swapchain = true;
+                    }
+                    VirtualKeyCode::Key4 => {
+                        level = Levels::FOUR;
+                        recreate_swapchain = true;
+                    }
+                    VirtualKeyCode::Key5 => {
+                        level = Levels::FIVE;
+                        recreate_swapchain = true;
                     }
                     _ => {}
-                }
+                },
+                None => {}
+            },
+            _ => {}
+        },
+        Event::RedrawEventsCleared => {
+            let window = surface.object().unwrap().downcast_ref::<Window>().unwrap();
+            let dimensions = window.inner_size();
+            if dimensions.width == 0 || dimensions.height == 0 {
+                return;
             }
-            Event::RedrawEventsCleared => {
-                let window = surface.object().unwrap().downcast_ref::<Window>().unwrap();
-                let dimensions = window.inner_size();
-                if dimensions.width == 0 || dimensions.height == 0 {
-                    return;
-                }
 
-                previous_frame_end.as_mut().unwrap().cleanup_finished();
+            previous_frame_end.as_mut().unwrap().cleanup_finished();
 
-                if recreate_swapchain {
-                    let (new_swapchain, new_images) =
-                        match swapchain.recreate(SwapchainCreateInfo {
-                            image_extent: dimensions.into(),
-                            ..swapchain.create_info()
-                        }) {
-                            Ok(r) => r,
-                            Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
-                            Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
-                        };
+            if recreate_swapchain {
+                let (new_swapchain, new_images) = match swapchain.recreate(SwapchainCreateInfo {
+                    image_extent: dimensions.into(),
+                    ..swapchain.create_info()
+                }) {
+                    Ok(r) => r,
+                    Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
+                    Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
+                };
 
-                    swapchain = new_swapchain;
-                    let (new_pipeline, new_framebuffers) = window_size_dependent_setup(
-                        &memory_allocator,
-                        &vs,
-                        &fs,
-                        &new_images,
-                        {
+                swapchain = new_swapchain;
+                let (new_pipeline, new_framebuffers) = window_size_dependent_setup(
+                    &memory_allocator,
+                    &vs,
+                    &fs,
+                    &new_images,
+                    {
+                        if level >= Levels::FOUR {
+                            render_pass_1.clone()
+                        } else {
+                            render_pass_2.clone()
+                        }
+                    },
+                    level,
+                );
+                pipeline = new_pipeline;
+                framebuffers = new_framebuffers;
+                recreate_swapchain = false;
+            }
+
+            let vs_uniform_buffer_subbuffer = {
+                let rotation = Mat3::from_rotation_y((0) as f32);
+
+                let aspect_ratio =
+                    swapchain.image_extent()[0] as f32 / swapchain.image_extent()[1] as f32;
+                let proj = perspective_rh(aspect_ratio);
+                let view = Mat4::look_at_rh(
+                    Vec3::new(0.0, 0.0, 2.0),
+                    Vec3::new(0.0, 0.0, 0.0),
+                    Vec3::new(0.0, -1.0, 0.0),
+                );
+                let scale = Mat4::from_scale(Vec3::new(1.0, 1.0, 1.0));
+
+                let uniform_data = vs::ty::Data {
+                    world: Mat4::from_mat3(rotation).to_cols_array_2d(),
+                    view: (view * scale).to_cols_array_2d(),
+                    proj,
+                    lev_2: (level >= Levels::TWO) as u32,
+                };
+
+                vs_uniform_buffer.from_data(uniform_data).unwrap()
+            };
+
+            let fs_uniform_buffer_subbuffer = {
+                let uniform_data = fs::ty::Data {
+                    lighting: (level >= Levels::FIVE) as u32,
+                };
+
+                fs_uniform_buffer.from_data(uniform_data).unwrap()
+            };
+
+            let layout = pipeline.layout().set_layouts().get(0).unwrap();
+            let set = PersistentDescriptorSet::new(
+                &descriptor_set_allocator,
+                layout.clone(),
+                [
+                    WriteDescriptorSet::buffer(0, vs_uniform_buffer_subbuffer),
+                    WriteDescriptorSet::buffer(1, fs_uniform_buffer_subbuffer),
+                ],
+            )
+            .unwrap();
+
+            let (image_index, suboptimal, acquire_future) =
+                match acquire_next_image(swapchain.clone(), None) {
+                    Ok(r) => r,
+                    Err(AcquireError::OutOfDate) => {
+                        recreate_swapchain = true;
+                        return;
+                    }
+                    Err(e) => panic!("Failed to acquire next image: {:?}", e),
+                };
+
+            if suboptimal {
+                recreate_swapchain = true;
+            }
+
+            let mut builder = AutoCommandBufferBuilder::primary(
+                &command_buffer_allocator,
+                queue.queue_family_index(),
+                CommandBufferUsage::OneTimeSubmit,
+            )
+            .unwrap();
+            builder
+                .begin_render_pass(
+                    RenderPassBeginInfo {
+                        clear_values: {
                             if level >= Levels::FOUR {
-                                render_pass_1.clone()
+                                vec![
+                                    Some([0.0, 0.2, 0.6, 1.0].into()),
+                                    Some([0.0, 0.2, 0.6, 1.0].into()),
+                                    Some(1f32.into()),
+                                ]
                             } else {
-                                render_pass_2.clone()
+                                vec![Some([0.0, 0.2, 0.6, 1.0].into()), Some(1f32.into())]
                             }
                         },
-                        level
-                    );
-                    pipeline = new_pipeline;
-                    framebuffers = new_framebuffers;
-                    recreate_swapchain = false;
-                }
-
-                let vs_uniform_buffer_subbuffer = {
-                    let elapsed = rotation_start.elapsed();
-                    let rotation =
-                        elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1_000_000_000.0;
-                    let rotation = Mat3::from_rotation_y((0) as f32);
-
-                    let aspect_ratio =
-                        swapchain.image_extent()[0] as f32 / swapchain.image_extent()[1] as f32;
-                    let proj = perspective_rh(aspect_ratio);
-                    let view = Mat4::look_at_rh(
-                        Vec3::new(0.0, 0.0, 2.0),
-                        Vec3::new(0.0, 0.0, 0.0),
-                        Vec3::new(0.0, -1.0, 0.0),
-                    );
-                    let scale = Mat4::from_scale(Vec3::new(1.0, 1.0, 1.0));
-
-                    let uniform_data = vs::ty::Data {
-                        world: Mat4::from_mat3(rotation).to_cols_array_2d(),
-                        view: (view * scale).to_cols_array_2d(),
-                        proj,
-                        lev_2: (level >= Levels::TWO) as u32,
-                    };
-
-                    vs_uniform_buffer.from_data(uniform_data).unwrap()
-                };
-
-                let fs_uniform_buffer_subbuffer = {
-                    let uniform_data = fs::ty::Data {
-                        lighting: (level >= Levels::FIVE) as u32,
-                    };
-
-                    fs_uniform_buffer.from_data(uniform_data).unwrap()
-                };
-
-
-                let layout = pipeline.layout().set_layouts().get(0).unwrap();
-                let set = PersistentDescriptorSet::new(
-                    &descriptor_set_allocator,
-                    layout.clone(),
-                    [
-                        WriteDescriptorSet::buffer(0, vs_uniform_buffer_subbuffer),
-                        WriteDescriptorSet::buffer(1, fs_uniform_buffer_subbuffer)
-                    ],
+                        ..RenderPassBeginInfo::framebuffer(
+                            framebuffers[image_index as usize].clone(),
+                        )
+                    },
+                    SubpassContents::Inline,
                 )
+                .unwrap()
+                .bind_pipeline_graphics(pipeline.clone())
+                .bind_descriptor_sets(
+                    PipelineBindPoint::Graphics,
+                    pipeline.layout().clone(),
+                    0,
+                    set,
+                )
+                .bind_vertex_buffers(0, (vertex_buffer.clone(), instance_buffer.clone()))
+                .bind_index_buffer(index_buffer.clone())
+                .draw_indexed(
+                    index_buffer.len() as u32,
+                    instance_buffer.len() as u32,
+                    0,
+                    0,
+                    0,
+                )
+                .unwrap()
+                .end_render_pass()
                 .unwrap();
+            let command_buffer = builder.build().unwrap();
 
-                let (image_index, suboptimal, acquire_future) =
-                    match acquire_next_image(swapchain.clone(), None) {
-                        Ok(r) => r,
-                        Err(AcquireError::OutOfDate) => {
-                            recreate_swapchain = true;
-                            return;
-                        }
-                        Err(e) => panic!("Failed to acquire next image: {:?}", e),
-                    };
+            let future = previous_frame_end
+                .take()
+                .unwrap()
+                .join(acquire_future)
+                .then_execute(queue.clone(), command_buffer)
+                .unwrap()
+                .then_swapchain_present(
+                    queue.clone(),
+                    SwapchainPresentInfo::swapchain_image_index(swapchain.clone(), image_index),
+                )
+                .then_signal_fence_and_flush();
 
-                if suboptimal {
+            match future {
+                Ok(future) => {
+                    previous_frame_end = Some(future.boxed());
+                }
+                Err(FlushError::OutOfDate) => {
                     recreate_swapchain = true;
+                    previous_frame_end = Some(now(device.clone()).boxed());
                 }
-
-                let mut builder = AutoCommandBufferBuilder::primary(
-                    &command_buffer_allocator,
-                    queue.queue_family_index(),
-                    CommandBufferUsage::OneTimeSubmit,
-                )
-                .unwrap();
-                builder
-                    .begin_render_pass(
-                        RenderPassBeginInfo {
-                            clear_values: {
-                                if level >= Levels::FOUR {
-                                    vec![
-                                        Some([0.0, 0.2, 0.6, 1.0].into()),
-                                        Some([0.0, 0.2, 0.6, 1.0].into()),
-                                        Some(1f32.into())
-                                    ]
-                                } else {
-                                    vec![
-                                        Some([0.0, 0.2, 0.6, 1.0].into()),
-                                        Some(1f32.into())
-                                    ]
-                                }
-                            },
-                            ..RenderPassBeginInfo::framebuffer(
-                                framebuffers[image_index as usize].clone(),
-                            )
-                        },
-                        SubpassContents::Inline,
-                    )
-                    .unwrap()
-                    .bind_pipeline_graphics(pipeline.clone())
-                    .bind_descriptor_sets(
-                        PipelineBindPoint::Graphics,
-                        pipeline.layout().clone(),
-                        0,
-                        set,
-                    )
-                    .bind_vertex_buffers(0, (vertex_buffer.clone(), instance_buffer.clone()))
-                    .bind_index_buffer(index_buffer.clone())
-                    .draw_indexed(index_buffer.len() as u32, instance_buffer.len() as u32, 0, 0, 0)
-                    .unwrap()
-                    .end_render_pass()
-                    .unwrap();
-                let command_buffer = builder.build().unwrap();
-
-                let future = previous_frame_end
-                    .take()
-                    .unwrap()
-                    .join(acquire_future)
-                    .then_execute(queue.clone(), command_buffer)
-                    .unwrap()
-                    .then_swapchain_present(
-                        queue.clone(),
-                        SwapchainPresentInfo::swapchain_image_index(swapchain.clone(), image_index),
-                    )
-                    .then_signal_fence_and_flush();
-
-                match future {
-                    Ok(future) => {
-                        previous_frame_end = Some(future.boxed());
-                    }
-                    Err(FlushError::OutOfDate) => {
-                        recreate_swapchain = true;
-                        previous_frame_end = Some(now(device.clone()).boxed());
-                    }
-                    Err(e) => {
-                        println!("Failed to flush future: {:?}", e);
-                        previous_frame_end = Some(now(device.clone()).boxed());
-                    }
+                Err(e) => {
+                    println!("Failed to flush future: {:?}", e);
+                    previous_frame_end = Some(now(device.clone()).boxed());
                 }
             }
-            _ => (),
         }
+        _ => (),
     });
 }
 
@@ -580,7 +573,7 @@ fn window_size_dependent_setup(
         AttachmentImage::transient_multisampled(
             memory_allocator,
             dimensions,
-            SampleCount::Sample4,
+            SampleCount::Sample8,
             Format::D16_UNORM,
         )
         .unwrap(),
@@ -588,12 +581,7 @@ fn window_size_dependent_setup(
     .unwrap();
 
     let depth_buffer = ImageView::new_default(
-        AttachmentImage::transient(
-            memory_allocator,
-            dimensions,
-            Format::D16_UNORM,
-        )
-        .unwrap(),
+        AttachmentImage::transient(memory_allocator, dimensions, Format::D16_UNORM).unwrap(),
     )
     .unwrap();
 
@@ -604,7 +592,7 @@ fn window_size_dependent_setup(
                 AttachmentImage::transient_multisampled(
                     memory_allocator,
                     image.dimensions().width_height(),
-                    SampleCount::Sample4,
+                    SampleCount::Sample8,
                     image.format(),
                 )
                 .unwrap(),
@@ -619,7 +607,7 @@ fn window_size_dependent_setup(
                         ..Default::default()
                     },
                 )
-                    .unwrap()
+                .unwrap()
             } else {
                 Framebuffer::new(
                     render_pass.clone(),
@@ -628,15 +616,16 @@ fn window_size_dependent_setup(
                         ..Default::default()
                     },
                 )
-                    .unwrap()
-            }
+                .unwrap()
+            };
         })
         .collect::<Vec<_>>();
 
     let mut pipeline = GraphicsPipeline::start()
-        .vertex_input_state(BuffersDefinition::new()
-            .vertex::<Vertex>()
-            .instance::<MonkeInstance>()
+        .vertex_input_state(
+            BuffersDefinition::new()
+                .vertex::<Vertex>()
+                .instance::<MonkeInstance>(),
         )
         .vertex_shader(vs.entry_point("main").unwrap(), ())
         .input_assembly_state(InputAssemblyState::new())
@@ -648,22 +637,22 @@ fn window_size_dependent_setup(
             },
         ]))
         .fragment_shader(fs.entry_point("main").unwrap(), ());
-        if level >= Levels::THREE {
-            pipeline = pipeline.depth_stencil_state(DepthStencilState::simple_depth_test());
-        } else {
-            pipeline = pipeline.depth_stencil_state(DepthStencilState::disabled());
-        }
+    if level >= Levels::THREE {
+        pipeline = pipeline.depth_stencil_state(DepthStencilState::simple_depth_test());
+    } else {
+        pipeline = pipeline.depth_stencil_state(DepthStencilState::disabled());
+    }
 
-        if level >= Levels::FOUR {
-            pipeline = pipeline.multisample_state(MultisampleState {
-                rasterization_samples: SampleCount::Sample4,
-                ..Default::default()
-            })
-        }
-        let pipeline = pipeline
-            .render_pass(Subpass::from(render_pass, 0).unwrap())
-            .build(memory_allocator.device().clone())
-            .unwrap();
+    if level >= Levels::FOUR {
+        pipeline = pipeline.multisample_state(MultisampleState {
+            rasterization_samples: SampleCount::Sample8,
+            ..Default::default()
+        })
+    }
+    let pipeline = pipeline
+        .render_pass(Subpass::from(render_pass, 0).unwrap())
+        .build(memory_allocator.device().clone())
+        .unwrap();
 
     (pipeline, framebuffers)
 }
